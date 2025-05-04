@@ -62,7 +62,152 @@ def lookup_xtalk_error(error_dict, edge1, edge2):
 
 def map_circuit(quantum_circuit, target_hardware, t1_times=None, xtalk_errors=None):
     # Map circuit qubits to hardware qubits to minimize interaction distance
-    return
+    ig = interaction_graph_from_circuit(quantum_circuit)
+    assert len(ig.nodes) <= len(target_hardware.nodes), "Not enough qubits in hardware"
+
+    mapping = {}
+    available_hw_qubits = set(target_hardware.nodes)
+    hw_paths = dict(nx.all_pairs_shortest_path_length(target_hardware))
+
+    # Prioritize qubits with longer coherence times
+    t1_priority = {}
+    if t1_times:
+        t1_priority = {hw_q: t1 for hw_q, t1 in t1_times.items()}
+
+    interaction_edges = sorted([(u, v, ig[u][v]['weight']) for u, v in ig.edges], key=lambda x: x[2], reverse=True)
+
+    # Place first pair of most-interacting qubits on adj hardware nodes
+    # Prioritize pairs with better T1 times
+    if interaction_edges:
+        q1, q2, _ = interaction_edges[0]
+
+        best_hw_pair = None
+        best_hw_score = -float('inf')
+
+        for hw1 in target_hardware.nodes:
+            for hw2 in target_hardware.neighbors(hw1):
+                if t1_times:
+                    score = t1_times.get(hw1, 0) + t1_times.get(hw2, 0)
+
+                    if xtalk_errors:
+                        avg_xtalk = 1.0
+                        count = 0
+
+                        for other_hw1, other_hw2 in target_hardware.edges:
+                            if (hw1, hw2) != (other_hw1, other_hw2) and (hw1, hw2) != (other_hw2, other_hw1):
+                                error = lookup_xtalk_error(xtalk_errors, (hw1, hw2), (other_hw1, other_hw2))
+                                avg_xtalk *= error
+                                count += 1
+
+                        if count > 0:
+                            score *= avg_xtalk
+
+                    if score > best_hw_score:
+                        best_hw_score = score
+                        best_hw_pair = (hw1, hw2)
+                else:
+                    best_hw_pair = (hw1, hw2)
+                    break
+
+            if best_hw_pair and not t1_times:
+                break
+
+        if best_hw_pair:
+            hw1, hw2 = best_hw_pair
+            mapping[q1] = hw1
+            mapping[q2] = hw2
+            available_hw_qubits.remove(hw1)
+            available_hw_qubits.remove(hw2)
+        else:
+            hw1 = next(iter(available_hw_qubits))
+            available_hw_qubits.remove(hw1)
+            hw2 = next(iter(available_hw_qubits))
+            available_hw_qubits.remove(hw2)
+            mapping[q1] = hw1
+            mapping[q2] = hw2
+
+    for q1, q2, weight in interaction_edges:
+        if q1 in mapping and q2 in mapping:
+            continue
+        elif q1 in mapping and q2 not in mapping:
+            best_hw = None
+            best_score = -float('inf')
+
+            # Find hw node maximizing weighted score by distance and T1
+            for hw in available_hw_qubits:
+                dist = hw_paths[mapping[q1]][hw]
+                score = -dist
+                if t1_times:
+                    t1_factor = t1_times.get(hw, 0) / max(t1_times.values())
+                    score += t1_factor * 2
+
+                if xtalk_errors and (mapping[q1], hw) in target_hardware.edges:
+                    avg_xtalk = 1.0
+                    count = 0
+
+                    for other_hw1, other_hw2 in target_hardware.edges:
+                        if (mapping[q1], hw) != (other_hw1, other_hw2) and (mapping[q1], hw) != (other_hw2, other_hw1):
+                            error = lookup_xtalk_error(xtalk_errors, (mapping[q1], hw), (other_hw1, other_hw2))
+                            avg_xtalk *= error
+                            count += 1
+
+                    if count > 0:
+                        # Scale crosstalk factor for meaningful impact
+                        score += (avg_xtalk - 0.9) * 10
+                if score > best_score:
+                    best_score = score
+                    best_hw = hw
+            
+            mapping[q2] = best_hw
+            available_hw_qubits.remove(best_hw)
+        elif q2 in mapping and q1 not in mapping:
+            best_hw = None
+            best_score = -float('inf')
+
+            for hw in available_hw_qubits:
+                dist = hw_paths[mapping[q2]][hw]
+                score = -dist
+
+                if t1_times:
+                    t1_factor = t1_times.get(hw, 0) / max(t1_times.values())
+                    score += t1_factor * 2
+
+                if xtalk_errors and (mapping[q2], hw) in target_hardware.edges:
+                    avg_xtalk = 1.0
+                    count = 0
+
+                    for other_hw1, other_hw2 in target_hardware.edges:
+                        if (mapping[q2], hw) != (other_hw1, other_hw2) and (mapping[q2], hw) != (other_hw2, other_hw1):
+                            error = lookup_xtalk_error(xtalk_errors, (mapping[q2], hw), (other_hw1, other_hw2))
+                            avg_xtalk *= error
+                            count += 1
+
+                    if count > 0:
+                        score += (avg_xtalk - 0.9) * 10
+
+                if score > best_score:
+                    best_score = score
+                    best_hw = hw
+            
+            mapping[q1] = best_hw
+            available_hw_qubits.remove(best_hw)
+        
+    unmapped_qubits = [q for q in ig.nodes if q not in mapping]
+
+    if t1_times:
+        sorted_hw_qubits = sorted(list(available_hw_qubits), key=lambda hw: t1_times.get(hw, 0), reverse=True)
+
+        for q in unmapped_qubits:
+            if sorted_hw_qubits:
+                hw = sorted_hw_qubits.pop(0)
+                mapping[q]
+                available_hw_qubits.remove(hw)
+    else:
+        for q in unmapped_qubits:
+            hw = available_hw_qubits.pop()
+            mapping[q] = hw
+
+    return mapping
 
 def route_circuit(quantum_circuit, target_hardware, mapping, t1_times=None, x_talk_errors=None):
     # Route circuit by adding SWAP ops for non-adjacent qubits
