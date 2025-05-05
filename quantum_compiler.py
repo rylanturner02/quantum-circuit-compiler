@@ -239,4 +239,8 @@ def schedule_circuit(routed_circuit, gate_times, T1_times, xtalk_errors):
 
 def compile_circuit(quantum_circuit, target_hardware, gate_times, t1_times=None, xtalk_errors=None):
     # Complete circuit compilation with mapping, routing, and scheduling
-    return
+    mapping = map_circuit(quantum_circuit, target_hardware, t1_times, xtalk_errors)
+    routed = route_circuit(quantum_circuit, target_hardware, mapping, t1_times, xtalk_errors)
+    schedule = schedule_circuit(routed, gate_times, t1_times, xtalk_errors)
+
+    return mapping, schedule
