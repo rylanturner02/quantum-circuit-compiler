@@ -55,7 +55,24 @@ def build_program_dependency_graph(circuit):
     return g
 
 def interaction_graph_from_circuit(circuit):
-    return
+    # Build weighted interaction graph for circuit
+    q = nx.Graph()
+
+    for instr in circuit:
+        for q in instr.qubits:
+            g.add_node(q)
+
+        for i in range(len(instr.qubits)):
+            for j in range(i):
+                q1 = instr.qubits[i]
+                q2 = instr.qubits[j]
+                if q1 != q2:
+                    if (q1, q2) not in g.edges:
+                        g.add_edge(q1, q2, weight=1)
+                    else:
+                        g.edges[q1, q2]['weight'] += 1
+
+    return g
 
 def lookup_xtalk_error(error_dict, edge1, edge2):
     return
