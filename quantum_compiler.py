@@ -75,7 +75,11 @@ def interaction_graph_from_circuit(circuit):
     return g
 
 def lookup_xtalk_error(error_dict, edge1, edge2):
-    return
+    # Lookup crosstalk error from pair of CNOT gates
+    edge1 = tuple(sorted(edge1))
+    edge2 = tuple(sorted(edge2))
+    edges = tuple(sorted([edge1, edge2]))
+    return error_dict.get(edges, 1.0)
 
 def map_circuit(quantum_circuit, target_hardware, t1_times=None, xtalk_errors=None):
     # Map circuit qubits to hardware qubits to minimize interaction distance
