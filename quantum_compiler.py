@@ -232,7 +232,80 @@ def map_circuit(quantum_circuit, target_hardware, t1_times=None, xtalk_errors=No
 
 def route_circuit(quantum_circuit, target_hardware, mapping, t1_times=None, x_talk_errors=None):
     # Route circuit by adding SWAP ops for non-adjacent qubits
-    return
+    new_circuit = QuantumCircuit(len(target_hardware.nodes))
+    current_mapping = mapping.copy()
+    
+    # Create reverse mapping
+    rev_mapping = {v: k for k, v in current_mapping.items()}
+    shortest_paths = dict(nx.all_pairs_shortest_path(target_hardware))
+    
+    for instr in quantum_circuit:
+        if len(instr.qubits) == 1:
+            q = instr.qubits[0]
+            hw_q = current_mapping[q]
+            new_circuit.append(instr.operation, [hw_q], instr.clbits)
+            
+        elif len(instr.qubits) == 2:
+            q1, q2 = instr.qubits
+            hw_q1, hw_q2 = current_mapping[q1], current_mapping[q2]
+            
+            # Check if qubits are already adjacent in hardware
+            if hw_q2 in target_hardware.neighbors(hw_q1):
+                new_circuit.append(instr.operation, [hw_q1, hw_q2], instr.clbits)
+            else:
+                path = shortest_paths[hw_q1][hw_q2]
+                
+                if t1_times:
+                    all_paths = list(nx.all_simple_paths(target_hardware, hw_q1, hw_q2, cutoff=len(path) + 2))
+                    
+                    best_path = path
+                    best_path_score = -float('inf')
+                    
+                    for candidate_path in all_paths:
+                        path_score = sum(t1_times.get(hw_q, 0) for hw_q in candidate_path)
+                        
+                        # Penalize longer paths
+                        path_score -= len(candidate_path) * 100000  # Large penalty to prioritize shorter paths
+                        
+                        if path_score > best_path_score:
+                            best_path_score = path_score
+                            best_path = candidate_path
+                    
+                    path = best_path
+                
+                swap_path = path[:-1]
+                
+                # Apply SWAPs along the path to move q1 next to q2
+                for i in range(len(swap_path) - 1):
+                    u, v = swap_path[i], swap_path[i+1]
+                    new_circuit.swap(u, v)
+                    
+                    for logical_q, hw_q in list(current_mapping.items()):
+                        if hw_q == u:
+                            current_mapping[logical_q] = v
+                        elif hw_q == v:
+                            current_mapping[logical_q] = u
+                    
+                    rev_mapping = {v: k for k, v in current_mapping.items()}
+                
+                hw_q1, hw_q2 = current_mapping[q1], current_mapping[q2]
+                
+                new_circuit.append(instr.operation, [hw_q1, hw_q2], instr.clbits)
+                
+                # Apply the same SWAPs in reverse to restore mapping
+                for i in range(len(swap_path) - 2, -1, -1):
+                    u, v = swap_path[i+1], swap_path[i]
+                    new_circuit.swap(u, v)
+                    
+                    for logical_q, hw_q in list(current_mapping.items()):
+                        if hw_q == u:
+                            current_mapping[logical_q] = v
+                        elif hw_q == v:
+                            current_mapping[logical_q] = u
+                    
+                    rev_mapping = {v: k for k, v in current_mapping.items()}
+    
+    return new_circuit
 
 def schedule_circuit(routed_circuit, gate_times, T1_times, xtalk_errors):
     # Convert SWAP gates to CNOT gates
