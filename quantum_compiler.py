@@ -56,7 +56,7 @@ def build_program_dependency_graph(circuit):
 
 def interaction_graph_from_circuit(circuit):
     # Build weighted interaction graph for circuit
-    q = nx.Graph()
+    g = nx.Graph()
 
     for instr in circuit:
         for q in instr.qubits:
